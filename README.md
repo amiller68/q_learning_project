@@ -11,7 +11,8 @@ Hamlet: 2:05
 - Q-learning algorithm
   - Executing the Q-learning algorithm
     - We initialize an empty 64 x 9 Q-learning matrix `Q`
-    - After loading the actions-matrix, we can randomly select an action `a` to take from our starting state `s`, and see what reward it yields. We use the reward to calculate `Q[s][a]` and then transition into the next state `s+1`. We repeat this until we reset, at which point we start the process over.
+    - After loading the actions-matrix, we can randomly select an action `a` to take from our starting state `s`, and see what reward it yields.
+    - We use the reward to calculate `Q[s][a]` and then transition into the next state `s+1`. We repeat this until we reset, at which point we start the process over.
     - We repeat the last step until our matrix converges.
     - Testing:
       - We will test our process for iterating through actions by running the phantom movement node, and see if the actions we dispatch correspond with the actions the phantom robot carries out.
@@ -27,7 +28,7 @@ Hamlet: 2:05
     - This should maximize our expected reward.
     - Testing:
       - Whether our algorithm maximizes reward correctly will depend on how well our Q-matrix is converged.
-      - If our robot has trouble deciding on the optimal course of action we either need to change our method for updating the Q-matrix or refine `sig` and `c`
+      - If our robot has trouble deciding on the optimal course of action we either need to change our method for updating the Q-matrix or redefine `sig` and `c`
 - Robot perception
   - Determining the identities and locations of the three colored objects
     - We can locate object using LiDAR, and identify them by using the robot's camera, comparing their colors to expected ranges which we must define.
