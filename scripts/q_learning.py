@@ -1,16 +1,29 @@
 #!/usr/bin/env python3
+import csv
+import sys
 
 import rospy
 import numpy as np
 import os
+from q_learning_project.msg import QLearningReward
+from q_learning_project.msg import RobotMoveObjectToTag
+
+from std_msgs.msg import Header
 
 # Path of directory on where this file is located
 path_prefix = os.path.dirname(__file__) + "/action_states/"
+q_matrix_path = os.path.dirname(__file__) + "/q_matrix.csv"
 
 class QLearning(object):
     def __init__(self):
         # Initialize this node
         rospy.init_node("q_learning")
+
+        # ROS subscribe to the topic publishing actions for the robot to take
+        rospy.Subscriber("/q_learning/reward", QLearningReward, self.accept_reward)
+
+        # ROS publishers
+        self.action_pub = rospy.Publisher("/q_learning/robot_action", RobotMoveObjectToTag, queue_size=10)
 
         # Fetch pre-built action matrix. This is a 2d numpy array where row indexes
         # correspond to the starting state and column indexes are the next states.
@@ -44,10 +57,44 @@ class QLearning(object):
         self.states = np.loadtxt(path_prefix + "states.txt")
         self.states = list(map(lambda x: list(map(lambda y: int(y), x)), self.states))
 
+        # Initialize our Q Matrix
+        self.q_matrix = [
+            [0] * len(self.actions)
+            for _ in self.states
+        ]
+
+        # Run our learner
+        self.running = True
+        self.run()
+
+    # Update Q matrix and then calculate the next action
+    def accept_reward(self, reward):
+        self.save_q_matrix()
+
+    # return a Robot move to object msg based on action index
+    def get_action(self, ind):
+        # Get our action by index
+        action = self.actions[ind]
+        # Initialize a new message
+        ret = RobotMoveObjectToTag()
+        ret.robot_object = action['object']
+        ret.tag_id = action['tag']
+        return ret
+
     def save_q_matrix(self):
-        # TODO: You'll want to save your q_matrix to a file once it is done to
-        # avoid retraining
+        with open(q_matrix_path, "w+") as q_csv:
+            writer = csv.writer(q_csv, delimiter=',')
+            writer.writerows(self.q_matrix)
+        print("Q Matrix saved. exiting...")
+        self.running = False
+
+    def run(self):
+        while self.running:
+            rospy.spin()
+        print("Q learner exiting...")
         return
+
 
 if __name__ == "__main__":
     node = QLearning()
+    sys.exit()
