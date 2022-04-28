@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import csv
+import math
 import sys
+import time
 
 import rospy
 import numpy as np
@@ -13,6 +15,8 @@ from std_msgs.msg import Header
 # Path of directory on where this file is located
 path_prefix = os.path.dirname(__file__) + "/action_states/"
 q_matrix_path = os.path.dirname(__file__) + "/q_matrix.csv"
+
+# TODO: I know the communication works, byt the sending of the first action only gets heard inconsistently
 
 class QLearning(object):
     def __init__(self):
@@ -63,23 +67,47 @@ class QLearning(object):
             for _ in self.states
         ]
 
+        # Variables to hold our current state
+        self.state_id = 0
+        self.last_action_id = None
+
         # Run our learner
         self.running = True
-        self.run()
 
     # Update Q matrix and then calculate the next action
     def accept_reward(self, reward):
-        self.save_q_matrix()
+        print("[QLEARNER ] accepting a new reward: ", reward)
+        self.update_q_matrix(reward)
+        if self.matrix_converged():
+            self.save_q_matrix()
+            return
+        next_action_id = self.get_next_action()
+        self.send_action(next_action_id)
 
-    # return a Robot move to object msg based on action index
-    def get_action(self, ind):
+    def send_action(self, action_id):
         # Get our action by index
-        action = self.actions[ind]
+        action = self.actions[action_id]
+        self.last_action_id = action_id
+
         # Initialize a new message
         ret = RobotMoveObjectToTag()
         ret.robot_object = action['object']
         ret.tag_id = action['tag']
-        return ret
+
+        # Publish the next action
+        self.action_pub.publish(ret)
+
+    def update_q_matrix(self, reward):
+        pass
+
+    def matrix_converged(self):
+        return True
+
+    # the id of the next action to take based on the state matrix
+    def get_next_action(self):
+        # TODO: Determine the next action
+        ind = 0
+        return ind
 
     def save_q_matrix(self):
         with open(q_matrix_path, "w+") as q_csv:
@@ -89,12 +117,26 @@ class QLearning(object):
         self.running = False
 
     def run(self):
-        while self.running:
-            rospy.spin()
-        print("Q learner exiting...")
-        return
+        # Send a first action to init training
+        try:
+            # print("[QLEARNER] Sending first action...")
+            self.send_action(self.get_next_action())
+            # print("[QLEARNER] Listening for rewards...")
+            while self.running:
+                rospy.spin()
+            print("[QLEARNER] Q learner exiting...")
+            return
+        except KeyboardInterrupt:
+            print("[QLEARNER] Q learner exiting...")
+            sys.exit()
 
 
 if __name__ == "__main__":
     node = QLearning()
-    sys.exit()
+    node.run()
+    # try:
+    #     while True:
+    #         node.send_action(0)
+    #         input()
+    # except KeyboardInterrupt:
+    #     sys.exit()
