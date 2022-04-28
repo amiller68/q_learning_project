@@ -8,6 +8,8 @@ import os
 
 from q_learning_project.msg import QLearningReward
 from q_learning_project.msg import RobotMoveObjectToTag
+from q_learning_project.msg import QMatrix
+
 
 '''
 This class handles publishing action to subscribers based on Q learning data
@@ -23,7 +25,7 @@ class RobotAction(object):
 
         # ROS subscribe to the topic publishing actions for the robot to take
         rospy.Subscriber("/q_learning/reward", QLearningReward, self.accept_reward)
-
+        rospy.Subscriber("/q_learning/matrix", QMatrix, self.get_matrix)
         # ROS publishers
         self.action_pub = rospy.Publisher("/q_learning/robot_action", RobotMoveObjectToTag, queue_size=10)
 
@@ -48,6 +50,9 @@ class RobotAction(object):
 
         self.running = True
         self.run()
+
+    def get_matrix(self, data):
+        self.q_matrix = data.q_matrix
 
     # Our manipulator should return a reward, even an empty one to signal that its done moving
     def accept_reward(self, reward):

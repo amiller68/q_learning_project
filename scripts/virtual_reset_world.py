@@ -88,7 +88,6 @@ class ResetWorld(object):
 
 
     def run(self):
-        print("[VRW] Running")
         rospy.spin()
 
 if __name__=="__main__":

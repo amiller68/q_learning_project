@@ -9,6 +9,7 @@ import numpy as np
 import os
 from q_learning_project.msg import QLearningReward
 from q_learning_project.msg import RobotMoveObjectToTag
+from q_learning_project.msg import QMatrix
 
 from std_msgs.msg import Header
 
@@ -28,6 +29,8 @@ class QLearning(object):
 
         # ROS publishers
         self.action_pub = rospy.Publisher("/q_learning/robot_action", RobotMoveObjectToTag, queue_size=10)
+
+        self.matrix_pub = rospy.Publisher("/q_learning/matrix", QMatrix, queue_size=10)
 
         # Fetch pre-built action matrix. This is a 2d numpy array where row indexes
         # correspond to the starting state and column indexes are the next states.
@@ -76,7 +79,7 @@ class QLearning(object):
 
     # Update Q matrix and then calculate the next action
     def accept_reward(self, reward):
-        print("[QLEARNER ] accepting a new reward: ", reward)
+        print("[QLEARNER] accepting a new reward")
         self.update_q_matrix(reward)
         if self.matrix_converged():
             self.save_q_matrix()
@@ -115,6 +118,10 @@ class QLearning(object):
             writer.writerows(self.q_matrix)
         print("Q Matrix saved. exiting...")
         self.running = False
+        ret = QMatrix()
+        ret.header = '' # TODO Figure out how to set this header
+        ret.q_matrix = self.q_matrix
+        self.matrix_pub.publish(ret)
 
     def run(self):
         # Send a first action to init training
@@ -122,8 +129,7 @@ class QLearning(object):
             # print("[QLEARNER] Sending first action...")
             self.send_action(self.get_next_action())
             # print("[QLEARNER] Listening for rewards...")
-            while self.running:
-                rospy.spin()
+            rospy.spin()
             print("[QLEARNER] Q learner exiting...")
             return
         except KeyboardInterrupt:
