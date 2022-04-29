@@ -152,7 +152,8 @@ class QLearning(object):
         try:
             print("[QLEARNER] Listening for rewards...")
             while not self.exit.is_set():
-                self.rateLimit.sleep()
+                time.sleep(1)
+                print("hmm")
             print("[QLEARNER] Q learner exiting...")
             return
         except KeyboardInterrupt:

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import csv
 import sys
+import threading
 import time
 
 import rospy
@@ -51,7 +52,7 @@ class RobotAction(object):
         with open(q_matrix_path, 'r') as q_csv:
             self.q_matrix = list(csv.reader(q_csv))
 
-        self.running = False
+        self.exit = threading.Event()
         self.run()
 
     def get_matrix(self, data):
@@ -59,14 +60,14 @@ class RobotAction(object):
 
     # Our manipulator should return a reward, even an empty one to signal that its done moving
     def accept_reward(self, reward):
-        if not self.running:
+        if not self.exit:
             print("[R-ACTION ERROR] Received a reward before started run!")
             return
 
         print("[R-ACTION] accepting a new reward")
         if self.reward_maximized():
             # Cause the node to exit if we're done moving objects
-            self.running = False
+            self.exit.set()
             return
         next_action_id = self.get_next_action()
         self.send_action(next_action_id)
@@ -101,18 +102,20 @@ class RobotAction(object):
         self.send_action(self.get_next_action())
 
         # Run our learner
-        self.running = False
         self.run()
 
     def run(self):
         # Send a first action to init training
         try:
             print("[R-ACTION] Listening for rewards...")
-            while self.running:
-                self.rateLimit.sleep()
+            while not self.exit.is_set():
+                time.sleep(1)
+            return
         except KeyboardInterrupt:
             print("[R-ACTION] exiting...")
             sys.exit()
+        finally:
+            rospy.signal_shutdown("Done processing Q-Matrix")
 
 
 if __name__ == "__main__":
