@@ -2,6 +2,7 @@
 import csv
 import math
 import sys
+import threading
 import time
 
 import rospy
@@ -23,14 +24,14 @@ class QLearning(object):
     def __init__(self):
         # Initialize this node
         rospy.init_node("q_learning")
-
+        self.rateLimit = rospy.Rate(1)  # How often we publish messages (2 Hz),
         # ROS subscribe to the topic publishing actions for the robot to take
         rospy.Subscriber("/q_learning/reward", QLearningReward, self.accept_reward)
 
         # ROS publishers
         self.action_pub = rospy.Publisher("/q_learning/robot_action", RobotMoveObjectToTag, queue_size=10)
 
-        self.matrix_pub = rospy.Publisher("/q_learning/matrix", QMatrix, queue_size=10)
+        self.matrix_pub = rospy.Publisher("/q_learning/q_matrix", QMatrix, queue_size=10)
 
         # Fetch pre-built action matrix. This is a 2d numpy array where row indexes
         # correspond to the starting state and column indexes are the next states.
@@ -70,15 +71,30 @@ class QLearning(object):
             for _ in self.states
         ]
 
+        self.q_matrix = None
+
+        self.init_q_matrix()
+
         # Variables to hold our current state
         self.state_id = 0
         self.last_action_id = None
 
         # Run our learner
-        self.running = True
+        self.exit = threading.Event()
+
+    def init_q_matrix(self):
+        self.q_matrix = [
+            [0] * len(self.actions)
+        ] * len(self.states)
+
+        # Set any impossible actions in a given state to have a reward of -1
 
     # Update Q matrix and then calculate the next action
     def accept_reward(self, reward):
+        if not self.exit:
+            print("[QLEARNER ERROR] Received a reward before started run!")
+            return
+
         print("[QLEARNER] accepting a new reward")
         self.update_q_matrix(reward)
         if self.matrix_converged():
@@ -116,33 +132,36 @@ class QLearning(object):
         with open(q_matrix_path, "w+") as q_csv:
             writer = csv.writer(q_csv, delimiter=',')
             writer.writerows(self.q_matrix)
-        print("Q Matrix saved. exiting...")
-        self.running = False
+        print("Q Matrix saved.")
+        self.exit.set()
         ret = QMatrix()
         ret.header = '' # TODO Figure out how to set this header
         ret.q_matrix = self.q_matrix
         self.matrix_pub.publish(ret)
 
+    def start_q_learning(self):
+        time.sleep(1)
+        print("[QLEARNER] Sending first action...")
+        self.send_action(self.get_next_action())
+
+        # Run our learner
+        self.run()
+
     def run(self):
         # Send a first action to init training
         try:
-            # print("[QLEARNER] Sending first action...")
-            self.send_action(self.get_next_action())
-            # print("[QLEARNER] Listening for rewards...")
-            rospy.spin()
+            print("[QLEARNER] Listening for rewards...")
+            while not self.exit.is_set():
+                self.rateLimit.sleep()
             print("[QLEARNER] Q learner exiting...")
             return
         except KeyboardInterrupt:
             print("[QLEARNER] Q learner exiting...")
             sys.exit()
+        finally:
+            rospy.signal_shutdown("Done processing Q-Matrix")
 
 
 if __name__ == "__main__":
     node = QLearning()
-    node.run()
-    # try:
-    #     while True:
-    #         node.send_action(0)
-    #         input()
-    # except KeyboardInterrupt:
-    #     sys.exit()
+    node.start_q_learning()

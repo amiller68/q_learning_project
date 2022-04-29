@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import csv
 import sys
+import time
 
 import rospy
 import numpy as np
@@ -22,10 +23,12 @@ class RobotAction(object):
     def __init__(self):
         # Initialize this node
         rospy.init_node("robot_action")
+        self.rateLimit = rospy.Rate(1)
 
         # ROS subscribe to the topic publishing actions for the robot to take
         rospy.Subscriber("/q_learning/reward", QLearningReward, self.accept_reward)
-        rospy.Subscriber("/q_learning/matrix", QMatrix, self.get_matrix)
+        # TODO: Implement getting q_matrix from a topic
+        # rospy.Subscriber("/q_learning/q_matrix", QMatrix, self.get_matrix)
         # ROS publishers
         self.action_pub = rospy.Publisher("/q_learning/robot_action", RobotMoveObjectToTag, queue_size=10)
 
@@ -48,7 +51,7 @@ class RobotAction(object):
         with open(q_matrix_path, 'r') as q_csv:
             self.q_matrix = list(csv.reader(q_csv))
 
-        self.running = True
+        self.running = False
         self.run()
 
     def get_matrix(self, data):
@@ -56,6 +59,10 @@ class RobotAction(object):
 
     # Our manipulator should return a reward, even an empty one to signal that its done moving
     def accept_reward(self, reward):
+        if not self.running:
+            print("[R-ACTION ERROR] Received a reward before started run!")
+            return
+
         print("[R-ACTION] accepting a new reward")
         if self.reward_maximized():
             # Cause the node to exit if we're done moving objects
@@ -87,19 +94,27 @@ class RobotAction(object):
         ind = 0
         return ind
 
+    # Once we have everything initialized, start sending actions
+    def start_action_sequence(self):
+        time.sleep(1)
+        print("[R-ACTION] Sending first action...")
+        self.send_action(self.get_next_action())
+
+        # Run our learner
+        self.running = False
+        self.run()
+
     def run(self):
         # Send a first action to init training
         try:
-            # print("[R-ACTION] Sending first action...")
-            self.send_action(self.get_next_action())
-            # print("[R-ACTION] Listening for rewards...")
+            print("[R-ACTION] Listening for rewards...")
             while self.running:
-                rospy.spin()
-            return
+                self.rateLimit.sleep()
         except KeyboardInterrupt:
-            print("[R-ACTION] Q learner exiting...")
+            print("[R-ACTION] exiting...")
             sys.exit()
 
 
 if __name__ == "__main__":
     node = RobotAction()
+    node.start_action_sequence()

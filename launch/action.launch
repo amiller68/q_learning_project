@@ -1,6 +1,6 @@
 <launch>
   <!-- run world restting node -->
-  <node name="robot_manipulation" pkg="q_learning_project" type="robot_manipulation.py" respawn="false" />
+  <node name="robot_controller" pkg="q_learning_project" type="robot_controller.py" respawn="false" />
 
   <node name="robot_action" pkg="q_learning_project" type="robot_action.py" respawn="false" />
 
