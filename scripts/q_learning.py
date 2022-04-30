@@ -14,6 +14,8 @@ from q_learning_project.msg import QMatrix
 
 from std_msgs.msg import Header
 
+from random import randint
+
 # Path of directory on where this file is located
 path_prefix = os.path.dirname(__file__) + "/action_states/"
 q_matrix_path = os.path.dirname(__file__) + "/q_matrix.csv"
@@ -41,14 +43,14 @@ class QLearning(object):
         # to go to the next state.
         #
         # e.g. self.action_matrix[0][12] = 5
-        self.action_matrix = np.loadtxt(path_prefix + "action_matrix.txt")
+        self.action_matrix = np.loadtxt(path_prefix + "action_matrix.txt").astype(int)
 
         # Fetch actions. These are the only 9 possible actions the system can take.
         # self.actions is an array of dictionaries where the row index corresponds
         # to the action number, and the value has the following form:
         # { object: "pink", tag: 1}
         colors = ["pink", "green", "blue"]
-        self.actions = np.loadtxt(path_prefix + "actions.txt")
+        self.actions = np.loadtxt(path_prefix + "actions.txt").astype(int)
         self.actions = list(map(
             lambda x: {"object": colors[int(x[0])], "tag": int(x[1])},
             self.actions
@@ -62,14 +64,8 @@ class QLearning(object):
         # e.g. [0, 1, 2] indicates that the green dumbbell is at block 1, and blue at block 2.
         # A value of 0 corresponds to the origin. 1/2/3 corresponds to the block number.
         # Note: that not all states are possible to get to.
-        self.states = np.loadtxt(path_prefix + "states.txt")
+        self.states = np.loadtxt(path_prefix + "states.txt").astype(int)
         self.states = list(map(lambda x: list(map(lambda y: int(y), x)), self.states))
-
-        # Initialize our Q Matrix
-        self.q_matrix = [
-            [0] * len(self.actions)
-            for _ in self.states
-        ]
 
         self.q_matrix = None
 
@@ -77,36 +73,65 @@ class QLearning(object):
 
         # Variables to hold our current state
         self.state_id = 0
+        self.last_reward_msg = None
         self.last_action_id = None
+
+        # Our convergence params
+        self.alpha = 1
+        self.gamma = 0.3
+
+        # Keep track of what step where at to know when to reset the world
+        self.steps = 0
+        # The lower this is the more converged the matrix will be
+        self.convergence_bound = 0.075
+        # Keep track of how many consecutive convergences we've observed
+        self.seq_convergences = 0
+        # How many seq convergences we need to observe to determine we're done
+        self.seq_convergences_target = 500
 
         # Run our learner
         self.exit = threading.Event()
 
     def init_q_matrix(self):
+        # Strategy: start with all impossible transitions
         self.q_matrix = [
-            [0] * len(self.actions)
-        ] * len(self.states)
-
-        # Set any impossible actions in a given state to have a reward of -1
+            [-1] * len(self.actions)
+            for _ in self.states
+        ]
+        # Set all valid actions to 0
+        for s in range(len(self.states)):
+            # For a given state, extract all valid actions (> -1)
+            available_actions = [a for a in self.action_matrix[s] if a != -1]
+            for a in available_actions:
+                self.q_matrix[s][a] = 0
 
     # Update Q matrix and then calculate the next action
     def accept_reward(self, reward):
-        if not self.exit:
+        print("[QLEARNER] accepting a new reward: ", reward.reward)
+
+        # Error check the reward
+        if self.exit.is_set():
             print("[QLEARNER ERROR] Received a reward before started run!")
             return
+        elif self.last_reward_msg == reward:
+            print("[QLEARNER ERROR] Received duplicate reward!")
+            return
+        self.last_reward_msg = reward
 
-        print("[QLEARNER] accepting a new reward")
-        self.update_q_matrix(reward)
-        if self.matrix_converged():
+        # Returns true if the matrix is converged
+        if self.update_q_matrix(reward.reward):
             self.save_q_matrix()
             return
         next_action_id = self.get_next_action()
+        print("[QLEARNER] Sending next action: ", next_action_id)
         self.send_action(next_action_id)
 
     def send_action(self, action_id):
+        print("Sending ACTION ID: ", action_id)
+        # Update our last action taken
+        self.last_action_id = action_id
         # Get our action by index
         action = self.actions[action_id]
-        self.last_action_id = action_id
 
         # Initialize a new message
         ret = RobotMoveObjectToTag()
@@ -116,17 +141,55 @@ class QLearning(object):
         # Publish the next action
         self.action_pub.publish(ret)
 
+    # Update our Q matrix and return True if its converged
     def update_q_matrix(self, reward):
-        pass
+        self.steps += 1
 
-    def matrix_converged(self):
-        return True
+        # Determine the next state
+        next_state_id = self.action_matrix[self.state_id].tolist().index(self.last_action_id)
+
+        # But if we've moved all the blocks, reset the world.
+        # Don't try and update because we'd be moving into an invalid state
+        if self.steps % 3 == 0:
+            if [_ for _ in self.q_matrix[next_state_id] if _ != -1] == []:
+                print("Entering an invalid state!")
+            print("[QLEARNER] Resetting state to 0")
+            next_state_id = 0
+            # return False
+
+        # Get the reward for our last action
+        last_reward = self.q_matrix[self.state_id][self.last_action_id]
+        # Get the maximum reward for the next state
+        print(self.q_matrix[next_state_id])
+        max_reward = max(self.q_matrix[next_state_id])
+        print("MAX REWARD: ", max_reward)
+
+        # Update our Q-Matrix based on the Q-Learning algorithm
+        self.q_matrix[self.state_id][self.last_action_id] += \
+            self.alpha * (reward + self.gamma * max_reward - last_reward)
+
+        print("[QLEARNER] Last reward: ", last_reward)
+        print("[QLEARNER] Updated reward: ", self.q_matrix[self.state_id][self.last_action_id])
+        # Transition to the next state
+        self.state_id = next_state_id
+        print("[QLEARNER] next state: ", self.state_id)
+
+        # Check if this is within the bounds of convergence
+        if abs(last_reward - self.q_matrix[self.state_id][self.last_action_id] <= self.convergence_bound):
+            self.seq_convergences += 1
+        # else:
+        #     self.seq_convergences = 0
+        print("[QLEARNER] Sequential convergences: ", self.seq_convergences)
+
+        # If we haven't converged yet, return false
+        return self.seq_convergences >= self.seq_convergences_target
 
     # the id of the next action to take based on the state matrix
     def get_next_action(self):
-        # TODO: Determine the next action
-        ind = 0
-        return ind
+        # Pick a random valid action based on our current state
+        available_actions = [a for a in self.action_matrix[self.state_id] if a != -1]
+        next_action_id = available_actions[randint(0, len(available_actions) - 1)]
+        return next_action_id
 
     def save_q_matrix(self):
         with open(q_matrix_path, "w+") as q_csv:
@@ -151,15 +214,15 @@ class QLearning(object):
         # Send a first action to init training
         try:
             print("[QLEARNER] Listening for rewards...")
-            while not self.exit.is_set():
+            while not self.exit.is_set() and not rospy.is_shutdown():
                 time.sleep(1)
-                print("hmm")
             print("[QLEARNER] Q learner exiting...")
             return
         except KeyboardInterrupt:
             print("[QLEARNER] Q learner exiting...")
             sys.exit()
         finally:
+            rospy.loginfo("[QLEARNER] Exiting")
             rospy.signal_shutdown("Done processing Q-Matrix")
 
 

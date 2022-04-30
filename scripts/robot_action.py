@@ -23,6 +23,7 @@ q_matrix_path = os.path.dirname(__file__) + "/q_matrix.csv"
 class RobotAction(object):
     def __init__(self):
         # Initialize this node
+        self.last_reward_msg = None
         rospy.init_node("robot_action")
         self.rateLimit = rospy.Rate(1)
 
@@ -32,6 +33,8 @@ class RobotAction(object):
         # rospy.Subscriber("/q_learning/q_matrix", QMatrix, self.get_matrix)
         # ROS publishers
         self.action_pub = rospy.Publisher("/q_learning/robot_action", RobotMoveObjectToTag, queue_size=10)
+
+        self.action_matrix = np.loadtxt(path_prefix + "action_matrix.txt")
 
         # Extract our actions, as done in q_learning.py
         colors = ["pink", "green", "blue"]
@@ -45,15 +48,16 @@ class RobotAction(object):
         self.states = list(map(lambda x: list(map(lambda y: int(y), x)), self.states))
 
         self.q_matrix = None
-        self.state = 0
-        self.reward = 0
+        self.state_id = 0
         self.last_action = None
 
         with open(q_matrix_path, 'r') as q_csv:
             self.q_matrix = list(csv.reader(q_csv))
 
+        self.steps = 0
+
         self.exit = threading.Event()
-        self.run()
+        self.processing = threading.Event()
 
     def get_matrix(self, data):
         self.q_matrix = data.q_matrix
@@ -63,6 +67,11 @@ class RobotAction(object):
         if not self.exit:
             print("[R-ACTION ERROR] Received a reward before started run!")
             return
+        if self.processing.is_set():
+            print("[QLEARNER ERROR] Received duplicate reward!")
+            return
+        self.processing.set()
+        self.last_reward_msg = reward
 
         print("[R-ACTION] accepting a new reward")
         if self.reward_maximized():
@@ -70,14 +79,21 @@ class RobotAction(object):
             self.exit.set()
             return
         next_action_id = self.get_next_action()
+        print("[R-ACTION] Sending next action: ", next_action_id)
         self.send_action(next_action_id)
+        self.processing.clear()
 
+    # Only take three steps
     def reward_maximized(self):
-        # TODO: Check if we've reached an optimal state
-        return True
+        self.state_id = self.action_matrix[self.state_id].tolist().index(self.last_action_id)
+        print("[R-ACTION] Next state: ", self.state_id)
+        self.steps += 1
+        return self.steps % 3 == 0
 
     def send_action(self, action_id):
         # Get our action by index
+        print("Sending ACTION ID: ", action_id)
+
         action = self.actions[action_id]
         self.last_action_id = action_id
 
@@ -89,16 +105,16 @@ class RobotAction(object):
         # Publish the next action
         self.action_pub.publish(ret)
 
-    # the id of the next action to take based on the state matrix
+    # the id of the best action to take based on the state
     def get_next_action(self):
-        # TODO: Determine the next action
-        ind = 0
-        return ind
+        # Pick a random valid action based on our current state
+        next_action_id = self.q_matrix[self.state_id].index(max(self.q_matrix[self.state_id]))
+        return next_action_id
 
     # Once we have everything initialized, start sending actions
     def start_action_sequence(self):
         time.sleep(1)
-        print("[R-ACTION] Sending first action...")
+        print("[R-ACTION] Sending first action from state 0")
         self.send_action(self.get_next_action())
 
         # Run our learner
