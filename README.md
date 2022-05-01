@@ -7,6 +7,46 @@ Alex Miller and Hamlet Fernandez
 Alex: 2:06
 Hamlet: 2:05
 
+## Writeup
+
+**Objectives description:** 
+There are two components to this project. 
+The first has to do with computing a decision-making matrix to guide a robot's actions towards an optimal outcome. 
+The second is an interface that can translate these decisions to the robot's environment in order to maximize some optimal real world outcome.
+The goal is to design a system that is able to use these components in order to make real world decisions about its world.
+
+**High-level description:** 
+We simulated an actor taking repeated random actions and receiving reward signals from its environment. 
+For each iteration, we used the actors current state, action, and next state in order to update its expected reward at its current state within a matrix.
+After many iterations of this, values within the matrix converged on their expected values, which could be used to determine optimal action sequences.
+These sequences represent optimal solutions to the problem of moving objects in front of AR tags; if you know them you know which colored object belong in front of each AR tag.
+
+**Q-learning algorithm description:** 
+Describe how you accomplished each of the following components of the Q-learning algorithm in 1-3 sentences, and also describe what functions / sections of the code executed each of these components (1-3 sentences per function / portion of code):
+_Selecting and executing actions for the robot (or phantom robot) to take_
+We implemented this component in the `get_next_action()` method of the `QLearning` class:
+ - Get all possible actions from the current state using `action_matrix`
+ - Select a random action id from the list of available actions
+ - return the random id
+
+_Updating the Q-matrix_
+We implemented this component in the `update_q_matrix(reward)` method of the `QLearning` class:
+ - On receiving a `reward` value of the `q_learning/reward` topic:
+   - determine the next state based on the current state and the last action taken.
+   - Calculate the maximum reward of the next state
+   - Use this value in order to update the q matrix for the current state and last action taken
+   - If we've taken a multiple of 3 steps, then reset the state to 0
+   
+_Determining when to stop iterating through the Q-learning algorithm_
+`update_q_matrix(reward)` returns True once it observes a total of `seq_convergence_target` updates with a value change less than `convergence_bound`.
+Once it returns True, the `QLearning` instance stops publishing actions and saves the q-matrix to a csv.
+
+_Executing the path most likely to lead to receiving a reward after the Q-matrix has converged on the simulated Turtlebot3 robot_
+We implemented this component in the `get_next_action` method of the `RobotAction` class.
+ - Given the current state, get the index of the action with the highest reward from the q-matrix
+ - Publish this action and wait for the next reward from the environment
+Once we've published three actions, our `RobotAction` class stops publishing actions and exits.
+
 ## Implementation Plan
 - Q-learning algorithm
   - Executing the Q-learning algorithm
@@ -58,7 +98,7 @@ Hamlet: 2:05
 ## Timeline
 
 This Week
-[ ] Finish Q-Learning algorithm and have a converged Matrix by Sunday
+[x] Finish Q-Learning algorithm and have a converged Matrix by Sunday
 [ ] Finish module for locating objects using LiDAR and Camera data by Wednesday
 
 Next Week
