@@ -83,27 +83,32 @@ class QLearning(object):
         # Keep track of what step where at to know when to reset the world
         self.steps = 0
         # The lower this is the more converged the matrix will be
-        self.convergence_bound = 0.075
+        self.convergence_bound = 0.05
         # Keep track of how many consecutive convergences we've observed
         self.seq_convergences = 0
         # How many seq convergences we need to observe to determine we're done
-        self.seq_convergences_target = 500
+        self.seq_convergences_target = 800
 
         # Run our learner
         self.exit = threading.Event()
 
     def init_q_matrix(self):
+        # Kenneth says make everything start at 0
         # Strategy: start with all impossible transitions
+        # self.q_matrix = [
+        #     [-1] * len(self.actions)
+        #     for _ in self.states
+        # ]
         self.q_matrix = [
-            [-1] * len(self.actions)
+            [0] * len(self.actions)
             for _ in self.states
         ]
-        # Set all valid actions to 0
-        for s in range(len(self.states)):
-            # For a given state, extract all valid actions (> -1)
-            available_actions = [a for a in self.action_matrix[s] if a != -1]
-            for a in available_actions:
-                self.q_matrix[s][a] = 0
+        # # Set all valid actions to 0
+        # for s in range(len(self.states)):
+        #     # For a given state, extract all valid actions (> -1)
+        #     available_actions = [a for a in self.action_matrix[s] if a != -1]
+        #     for a in available_actions:
+        #         self.q_matrix[s][a] = 0
 
     # Update Q matrix and then calculate the next action
     def accept_reward(self, reward):
@@ -148,15 +153,6 @@ class QLearning(object):
         # Determine the next state
         next_state_id = self.action_matrix[self.state_id].tolist().index(self.last_action_id)
 
-        # But if we've moved all the blocks, reset the world.
-        # Don't try and update because we'd be moving into an invalid state
-        if self.steps % 3 == 0:
-            if [_ for _ in self.q_matrix[next_state_id] if _ != -1] == []:
-                print("Entering an invalid state!")
-            print("[QLEARNER] Resetting state to 0")
-            next_state_id = 0
-            # return False
-
         # Get the reward for our last action
         last_reward = self.q_matrix[self.state_id][self.last_action_id]
         # Get the maximum reward for the next state
@@ -170,15 +166,27 @@ class QLearning(object):
 
         print("[QLEARNER] Last reward: ", last_reward)
         print("[QLEARNER] Updated reward: ", self.q_matrix[self.state_id][self.last_action_id])
+
+        # But if we've moved all the blocks, reset the world.
+        # Don't try and update because we'd be moving into an invalid state
+        if self.steps % 3 == 0:
+            # if [_ for _ in self.q_matrix[next_state_id] if _ != -1] == []:
+            #     print("Entering an invalid state!")
+            print("[QLEARNER] Resetting state to 0")
+            next_state_id = 0
+            # return False
+
         # Transition to the next state
         self.state_id = next_state_id
+
         print("[QLEARNER] next state: ", self.state_id)
 
         # Check if this is within the bounds of convergence
-        if abs(last_reward - self.q_matrix[self.state_id][self.last_action_id] <= self.convergence_bound):
+        if abs(last_reward - self.q_matrix[self.state_id][self.last_action_id]) <= self.convergence_bound:
             self.seq_convergences += 1
         # else:
         #     self.seq_convergences = 0
+
         print("[QLEARNER] Sequential convergences: ", self.seq_convergences)
 
         # If we haven't converged yet, return false
