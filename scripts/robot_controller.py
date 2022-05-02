@@ -13,19 +13,32 @@ from q_learning_project.msg import QLearningReward
 from q_learning_project.msg import RobotMoveObjectToTag
 
 
+# Return the CV ranges for an HSV color
+def cv_hsv(h, s, v):
+    return np.array([
+        h / 360 * 180 - 1,
+        s * 256 - 1,
+        v * 256 - 1
+    ])
+
+
 '''
 General class for perceiving objects around a robot
 Works on objects identified by color or AR tags
 '''
 
+
 class RobotPerception(object):
     def __init__(self):
         # HOW OUR LINE FOLLOWER WAS INITIALIZED
-        # self.bridge = cv_bridge.CvBridge()
+        self.bridge = cv_bridge.CvBridge()
         # # initalize the debugging window
-        # cv2.namedWindow("window", 1)
+        cv2.namedWindow("window", 1)
         # # subscribe to the robot's RGB camera data stream
-        # self.image_sub = rospy.Subscriber('camera/rgb/image_raw', Image, self.image_callback)
+        self.image_sub = rospy.Subscriber('camera/rgb/image_raw', Image, self.image_callback)
+
+        # A suscriber to get LaserScan Readings
+        self.scan_sub = rospy.Subscriber("/scan", LaserScan, self.scan_callback)
         # # self.image_sub = rospy.Subscriber('raspicam_node/image',
         # #                                   Image, self.image_callback)
         #
@@ -33,14 +46,37 @@ class RobotPerception(object):
         # self.queue_size = 20  # The size of our message queues
         # self.rateLimit = rospy.Rate(10)  # How often we publish messages (2 Hz), utilize with self.rateLimit.sleep()
         # # State to hold our img
-        self.img_msg = None
 
-        # Keep track of latest angular velocity (either L or R)
-        # True if moving left
-        self.lastDir = None
+        self.object_color_ranges = {
+            'blue': {
+                # HSV: 210, 1, 1
+                'lower': cv_hsv(210, 1, 1),
+                # HSV: 210, 1/2, 3/4
+                'upper': cv_hsv(210, 1/2, 3/4)
+            },
+            'pink': {
+                # HSV: 330, 1, 1
+                'lower': cv_hsv(330, 1, 1),
+                # HSV: 330, 1/2, 3/4
+                'upper': cv_hsv(330, 1/2, 3/4)
+            },
+            'green': {
+                # HSV: 120, 1/2, 1
+                'lower': cv_hsv(120, 1/2, 1),
+                # HSV: 120, 1, 3/4
+                'upper': cv_hsv(120, 1, 3/4)
+            }
+        }
+
+        self.img_msg = None
+        self.scan_msg = None
+
 
     def image_callback(self, msg):
         self.img_msg = msg
+
+    def scan_callback(self, msg):
+        self.scan_msg = msg
 
     # Locate an object and return an orientation correction and approximate distance
     # If the object is found then return None. Otherwise, return a tuple (err, dist).
@@ -49,37 +85,37 @@ class RobotPerception(object):
         ret = None
         # CODE FROM OUR LINE FOLLOWER
         # converts the incoming ROS message to OpenCV format and HSV (hue, saturation, value)
-        # image = self.bridge.imgmsg_to_cv2(self.img_msg, desired_encoding='bgr8')
-        # hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-        #
-        # lower_yellow = numpy.array([10, 50, 150])
-        # upper_yellow = numpy.array([20, 255, 255])
-        #
+        image = self.bridge.imgmsg_to_cv2(self.img_msg, desired_encoding='bgr8')
+        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+
+        lower_color = self.object_color_ranges[object_string]['lower']
+        upper_color = self.object_color_ranges[object_string]['upper']
+
         # # this erases all pixels that aren't yellow
-        # mask = cv2.inRange(hsv, lower_yellow, upper_yellow)
+        mask = cv2.inRange(hsv, lower_color, upper_color)
         #
         # # this limits our search scope to only view a slice of the image near the ground
-        # h, w, d = image.shape
-        # search_top = int(3 * h / 4)
-        # search_bot = int(3 * h / 4 + 20)
-        # mask[0:search_top, 0:w] = 0
-        # mask[search_bot:h, 0:w] = 0
-        #
+        h, w, d = image.shape
+        search_top = int(3 * h / 4)
+        search_bot = int(3 * h / 4 + 20)
+        mask[0:search_top, 0:w] = 0
+        mask[search_bot:h, 0:w] = 0
+
         # # using moments() function, the center of the yellow pixels is determined
-        # M = cv2.moments(mask)
-        # # if there are any yellow pixels found
-        # ret = None
-        # if M['m00'] > 0:
-        #     # center of the yellow pixels in the image
-        #     cx = int(M['m10'] / M['m00'])
-        #     cy = int(M['m01'] / M['m00'])
-        #
-        #     # # a red circle is visualized in the debugging window to indicate
-        #     # # the center point of the yellow pixels
-        #     # # hint: if you don't see a red circle, check your bounds for what is considered 'yellow'
-        #     cv2.circle(image, (cx, cy), 20, (0, 0, 255), -1)
-        #     err = -float((cx - w / 2)) / w
-        #     ret = err
+        M = cv2.moments(mask)
+        # if there are any yellow pixels found
+        ret = None
+        if M['m00'] > 0:
+            # center of the yellow pixels in the image
+            cx = int(M['m10'] / M['m00'])
+            cy = int(M['m01'] / M['m00'])
+
+            # # a red circle is visualized in the debugging window to indicate
+            # # the center point of the yellow pixels
+            # # hint: if you don't see a red circle, check your bounds for what is considered 'yellow'
+            cv2.circle(image, (cx, cy), 20, (0, 0, 255), -1)
+            err = -float((cx - w / 2)) / w
+            ret = (err, self.scan_msg.ranges[0])
         # # disable this to reduce lag
         # cv2.imshow("window", image)
         # cv2.waitKey(3)
@@ -103,6 +139,7 @@ class RobotManipulator(object):
         self.linear_speed = .5  # m/s
         self.angular_speed = .3  # rad/s
 
+
         # Our goal distance, how close we should get to a target
         self.target_dist = .1  # m
         pass
@@ -114,28 +151,33 @@ class RobotManipulator(object):
     # Tell the robot to follow some object based on estimated orientation error and how far it is, stored in tuple
     # Publishes a movement command that follows the specified target
     def follow_target(self, target):
-        err, dist = target
-
-        # If we've received a code for not knowing an objects location...
-        if not err and not dist:
-            # Try Looking around
-            return
-
-        print("Found a path: ", target)
-
-        # TODO: test this
-
         # Extract from target
         follow = Twist()
+        # If we've received a code for not knowing an objects location...
+        if not target:
+            # Try Looking around
+            follow.angular.z = self.angular_speed
+            self.move.publish(follow)
+            return True
+        else:
+            err, dist = target
 
-        # Implement linear proportional control
-        follow.linear.x = min(
-            self.linear_speed,
-            (dist - self.target_dist) / self.target_dist
-        )
-        follow.angular.z = err
-        print("Converging on target: ", follow.linear.x, "m/s @", follow.angular.z, "rad/s")
-        self.move.publish(follow)
+            print("Found a path: ", target)
+
+            # TODO: test this
+
+            # Implement linear proportional control
+            follow.linear.x = min(
+                self.linear_speed,
+                (dist - self.target_dist) / self.target_dist
+            )
+            follow.angular.z = err
+
+            print("Converging on target: ", follow.linear.x, "m/s @", follow.angular.z, "rad/s")
+            self.move.publish(follow)
+
+            # Based on whether we're done looking, return T or F
+            return False
 
     # Pick up an object
     def pickup_object(self):
@@ -156,6 +198,8 @@ class RobotController(object):
         # Initialize this node
         rospy.init_node("robot_controller")
 
+        self.rate = rospy.Rate(10)
+
         self.manipulator = RobotManipulator()
         self.perception = RobotPerception()
 
@@ -170,8 +214,8 @@ class RobotController(object):
         print("Received action: ", action)
 
         print("Moving towards object: ", action.robot_object)
-        while target := self.perception.locate_object(action.robot_object):
-            self.manipulator.follow_target(target)
+        while self.manipulator.follow_target(self.perception.locate_object(action.robot_object)):
+            self.rate.sleep()
 
         # Stop the robot
         self.manipulator.stop()
@@ -180,8 +224,8 @@ class RobotController(object):
         self.manipulator.pickup_object()
 
         print("Moving object towards tag: ", action.tag_id)
-        while target := self.perception.locate_object(action.tag_id):
-            self.manipulator.follow_target(target)
+        while self.manipulator.follow_target(self.perception.locate_object(action.tag_id)):
+            self.rate.sleep()
 
         # Stop the robot
         self.manipulator.stop()
