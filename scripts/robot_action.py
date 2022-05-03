@@ -129,9 +129,10 @@ class RobotAction(object):
             return
         except KeyboardInterrupt:
             print("[R-ACTION] exiting...")
+            self.exit.set()
             sys.exit()
-        finally:
-            rospy.signal_shutdown("Done processing Q-Matrix")
+        # finally:
+        #     rospy.signal_shutdown("Done processing Q-Matrix")
 
 
 if __name__ == "__main__":
