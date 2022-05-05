@@ -124,15 +124,16 @@ class RobotAction(object):
         # Send a first action to init training
         try:
             print("[R-ACTION] Listening for rewards...")
-            while not self.exit.is_set():
+            while not self.exit.is_set() and not rospy.is_shutdown():
                 time.sleep(1)
             return
         except KeyboardInterrupt:
-            print("[R-ACTION] exiting...")
-            self.exit.set()
+            print("[R-ACTION] force exiting...")
+            # self.exit.set()
             sys.exit()
-        # finally:
-        #     rospy.signal_shutdown("Done processing Q-Matrix")
+        finally:
+            rospy.loginfo("[R-ACTION] Exiting")
+            rospy.signal_shutdown("Done processing Q-Matrix")
 
 
 if __name__ == "__main__":

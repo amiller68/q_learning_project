@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import math
+import sys
 import time
 
 import rospy
@@ -8,6 +9,7 @@ import os
 
 import rospy, rospkg, cv2, cv_bridge, numpy
 from geometry_msgs.msg import Quaternion, Point, Pose, PoseArray, PoseStamped
+import moveit_commander
 from sensor_msgs.msg import LaserScan, Image
 from geometry_msgs.msg import Twist
 
@@ -35,7 +37,7 @@ class RobotPerception(object):
         # HOW OUR LINE FOLLOWER WAS INITIALIZED
         self.bridge = cv_bridge.CvBridge()
         # # initalize the debugging window
-        cv2.namedWindow("window", 1)
+        # cv2.namedWindow("window", 1)
 
         rp = rospkg.RosPack()
         # # subscribe to the robot's RGB camera data stream
@@ -44,7 +46,7 @@ class RobotPerception(object):
         # A suscriber to get LaserScan Readings
         self.scan_sub = rospy.Subscriber("/scan", LaserScan, self.scan_callback)
 
-        self.object_color_ranges = {
+        self.objects = {
             'blue': {
                 # HSV: 210, 1, 1
                 'lower': cv_hsv(210, 1, 1),
@@ -53,9 +55,13 @@ class RobotPerception(object):
             },
             'pink': {
                 # HSV: 330, 1, 1
-                'lower': cv_hsv(330, 1, 1),
+                # 'lower': cv_hsv(300, .85, .75),
+                'lower': cv_hsv(280, .6, .5),
+
+                # 'lower': cv_hsv(0, 0, 0),
+
                 # HSV: 330, 1/2, 3/4
-                'upper': cv_hsv(330, 1/2, 3/4)
+                'upper': cv_hsv(330, 1, 1)
             },
             'green': {
                 # HSV: 120, 1/2, 1
@@ -65,47 +71,77 @@ class RobotPerception(object):
             }
         }
 
-        self.img_data = None
-        self.scan_data = None
+        self.tags = {
+            1: '',
+            2: '',
+            3: ''
+        }
 
-    def image_callback(self, msg):
-        self.img_data = msg
+        # State to keep track of what object/tag we're targetting and our latest img data
+        self.target = None  # What target we're trying to locate at a given time
+        self.target_err = None  # The orientation error of our bot from target
+        self.target_dist = None  # How far the object directly in front of our robot is
+        self.image = None  # The image the robot is currently processing
+        self.scan_data = None  # The scan data the robot is currently processing
+
+    def image_callback(self, data):
+        # Bind the img to our state variable
+        self.image = self.bridge.imgmsg_to_cv2(data, desired_encoding='bgr8')
+        # If our target specifies an object
+        if self.target in self.objects:
+            # Look for the object, update err accordingly
+            self.locate_object()
+        elif self.target in self.tags:
+            self.locate_tag()
+        cv2.imshow("window", self.image)
+        cv2.waitKey(3)
 
     def scan_callback(self, msg):
         self.scan_data = msg
+        # Bind our target dist to the range of the object in front of us
+        self.target_dist = msg.ranges[0]
 
+    # check if the perceptor is initialized
     def initialized(self):
-        return self.img_data is not None and self.scan_data is not None
+        return self.image is not None and self.scan_data is not None
 
+    # Get the perceptors scan parameters. Used by the manipulator to determine max scan range
     def get_scan_data(self):
         if self.initialized():
             return self.scan_data
         return None
 
-    # Locate an object and return an orientation correction and approximate distance
-    # If the object is found then return None. Otherwise, return a tuple (err, dist).
-    # If the location is unknown return (None, None)
-    def locate_object(self, object_string):
-        # CODE FROM OUR LINE FOLLOWER
+    # Set what target our perceptor is looking for at any given time
+    def set_target(self, target):
+        # If this is a good target
+        if target in self.objects or target in self.tags:
+            self.target_err = None
+            self.target = target
+            return True
+        print("[R-PERCEPTION ERROR] Unknown target: ", target)
+        return False
+
+    # Get the perceptor's goal target based on its image and scan state
+    def get_target(self):
+        # If we have an idea of where to look for an object
+        if self.target_err:
+            return self.target_err, self.target_dist
+        return None
+
+    # Locate an object and set orientation correction to target_err
+    # If the object is found then set this value to None
+    def locate_object(self):
         # converts the incoming ROS message to OpenCV format and HSV (hue, saturation, value)
-        image = self.bridge.imgmsg_to_cv2(self.img_data, desired_encoding='bgr8')
-        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+        hsv = cv2.cvtColor(self.image, cv2.COLOR_BGR2HSV)
 
-        lower_color = self.object_color_ranges[object_string]['lower']
-        upper_color = self.object_color_ranges[object_string]['upper']
-
+        lower_color = self.objects[self.target]['lower']
+        upper_color = self.objects[self.target]['upper']
 
         # # this erases all pixels that aren't yellow
         mask = cv2.inRange(hsv, lower_color, upper_color)
-        #
+
         # # this limits our search scope to only view a slice of the image near the ground
-        h, w, d = image.shape
-        search_top = int(3 * h / 4)
-        search_bot = int(3 * h / 4 + 20)
-        mask[0:search_top, 0:w] = 0
-        mask[search_bot:h, 0:w] = 0
-
-
+        h, w, d = self.image.shape
 
         # # using moments() function, the center of the yellow pixels is determined
         M = cv2.moments(mask)
@@ -119,40 +155,60 @@ class RobotPerception(object):
             # # a red circle is visualized in the debugging window to indicate
             # # the center point of the yellow pixels
             # # hint: if you don't see a red circle, check your bounds for what is considered 'yellow'
-            cv2.circle(image, (cx, cy), 20, (0, 0, 255), -1)
-            err = -float((cx - w / 2)) / w
-            ret = (err, self.scan_data.ranges[0])
-        # # disable this to reduce lag
-        # print("5")
-        # cv2.imshow("window", image)
-        # cv2.waitKey(3)
-        return ret
+            cv2.circle(self.image, (cx, cy), 20, (0, 0, 255), -1)
+            ret = -float((cx - w / 2)) / w
+        # Set our reported target err
+        self.target_err = ret
 
-    # Locate an AR tag and return an orientation correction and approximate distance
-    # If the object is found then return None. Otherwise, return a tuple (err, dist).
-    # If the location is unknown return (None, None)
-    def locate_tag(self, tag_string):
+    # Locate an AR tag and set an orientation correction to target_err
+    # If the location is unknown set this value to None
+    def locate_tag(self):
         ret = None
         # This should look similar to the above, but we need to use the cv2 library
-        return ret
+        self.target_err = ret
 
+
+def joint_angs_to_radians(angs):
+    return map(math.radians, angs)
 
 class RobotManipulator(object):
     def __init__(self, scan_range_max=4.5):
         # Initialize a publisher to the velocity cmd topic
         self.move = rospy.Publisher('/cmd_vel', Twist, queue_size=10)
 
+        # # Interfaces for moving the robot arm
+        # self.move_group_arm = moveit_commander.MoveGroupCommander("arm")
+        # self.move_group_gripper = moveit_commander.MoveGroupCommander("gripper")
+
+        self.arm_positions = {
+            'start': joint_angs_to_radians([0, 17, 16, -33]),
+            'lift': joint_angs_to_radians([0, -100, 79, -70])
+        }
+
+        self.grips = {
+            'close': [0, 0],
+            'open': [.01, .01]
+        }
+
         # Set our velocity constants
-        self.linear_speed = .5  # m/s
-        self.angular_speed = .3  # rad/s
+        self.linear_speed = .1  # m/s
+        self.angular_speed = -.75  # rad/s
         self.scan_range_max = scan_range_max
 
         # Set a goal distance, how close we should get to a target
-        self.target_dist = .2  # m
+        self.target_dist = .35  # m
+
+        # self.move_group_arm.go(self.arm_positions['start'], wait=True)
+        # self.move_group_gripper.go(self.grips['open'], wait=True)
+
+        self.arm_ready = True
 
     # Stop the robot where it is
     def stop(self):
         self.move.publish(Twist())
+
+    def initialized(self):
+        return self.arm_ready
 
     # Tell the robot to follow some object based on estimated orientation error and how far it is, stored in tuple
     # Publishes a movement command that follows the specified target
@@ -162,7 +218,7 @@ class RobotManipulator(object):
         follow = Twist()
         # If we don't have a target
         if not target:
-            print("No path! Looking around...")
+            # print("No path! Looking around...")
             # Try Looking around for it
             follow.angular.z = self.angular_speed
             self.move.publish(follow)
@@ -202,11 +258,19 @@ class RobotManipulator(object):
 
     # Pick up an object
     def pickup_object(self):
-        pass
+        # self.move_group_gripper.go(self.grips['close'], wait=True)
+        # self.move_group_gripper.stop()
+        # self.move_group_arm.go(self.arm_positions['lift'], wait=True)
+        # self.move_group_arm.stop()
+        time.sleep(3)
 
     # Put down an object
     def put_down_object(self):
-        pass
+        # self.move_group_arm.go(self.arm_positions['start'], wait=True)
+        # self.move_group_arm.stop()
+        # self.move_group_gripper.go(self.grips['open'], wait=True)
+        # self.move_group_gripper.stop()
+        time.sleep(3)
 
 
 '''
@@ -221,16 +285,22 @@ class RobotController(object):
         rospy.init_node("robot_controller")
 
         self.rate = rospy.Rate(10)
+        print("Waiting for perception to be initialized")
 
         # Initialize our perception
         self.perception = RobotPerception()
-        print("Waiting for perception to be initialized")
         while not self.perception.initialized():
             print("...")
             time.sleep(1)
 
+        print("Waiting for manipulator to be initialized")
+
         # Initialize our manipulation class, make sure to provide it with a max scan value
         self.manipulator = RobotManipulator(scan_range_max=self.perception.get_scan_data().range_max)
+
+        while not self.manipulator.initialized():
+            print("...")
+            time.sleep(1)
 
         # ROS:
 
@@ -246,10 +316,15 @@ class RobotController(object):
         print("Received action: ", action)
 
         print("Moving towards object: ", action.robot_object)
-        target = self.perception.locate_object(action.robot_object)
+
+        # Set our perceptor to look for our object
+        if not self.perception.set_target(action.robot_object):
+            print("[R-Controller ERROR] Can't locate this object: ", action.robot_object)
+            sys.exit()
+
+        target = self.perception.get_target()
         while self.manipulator.follow_target(target):
-            target = self.perception.locate_object(action.robot_object)
-            pass
+            target = self.perception.get_target()
 
         # Stop the robot
         self.manipulator.stop()
@@ -258,10 +333,15 @@ class RobotController(object):
         self.manipulator.pickup_object()
 
         print("Moving object towards tag: ", action.tag_id)
-        target = self.perception.locate_tag(action.tag_id)
+
+        # Set our perceptor to look for our object
+        if not self.perception.set_target(action.tag_id):
+            print("[R-Controller ERROR] Can't locate this tag: ", action.tag_id)
+            sys.exit()
+
+        target = self.perception.get_target()
         while self.manipulator.follow_target(target):
-            target = self.perception.locate_tag(action.tag_id)
-            pass
+            target = self.perception.get_target()
 
         # Stop the robot
         self.manipulator.stop()
