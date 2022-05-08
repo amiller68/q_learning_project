@@ -176,9 +176,9 @@ class RobotManipulator(object):
         # Initialize a publisher to the velocity cmd topic
         self.move = rospy.Publisher('/cmd_vel', Twist, queue_size=10)
 
-        # # Interfaces for moving the robot arm
-        # self.move_group_arm = moveit_commander.MoveGroupCommander("arm")
-        # self.move_group_gripper = moveit_commander.MoveGroupCommander("gripper")
+        # Interfaces for moving the robot arm
+        self.move_group_arm = moveit_commander.MoveGroupCommander("arm")
+        self.move_group_gripper = moveit_commander.MoveGroupCommander("gripper")
 
         self.arm_positions = {
             'start': joint_angs_to_radians([0, 17, 16, -33]),
@@ -191,15 +191,15 @@ class RobotManipulator(object):
         }
 
         # Set our velocity constants
-        self.linear_speed = .1  # m/s
+        self.linear_speed = .05  # m/s
         self.angular_speed = -.75  # rad/s
         self.scan_range_max = scan_range_max
 
         # Set a goal distance, how close we should get to a target
-        self.target_dist = .35  # m
+        self.target_dist = .175  # m
 
-        # self.move_group_arm.go(self.arm_positions['start'], wait=True)
-        # self.move_group_gripper.go(self.grips['open'], wait=True)
+        self.move_group_arm.go(self.arm_positions['start'], wait=True)
+        self.move_group_gripper.go(self.grips['open'], wait=True)
 
         self.arm_ready = True
 
@@ -258,18 +258,18 @@ class RobotManipulator(object):
 
     # Pick up an object
     def pickup_object(self):
-        # self.move_group_gripper.go(self.grips['close'], wait=True)
-        # self.move_group_gripper.stop()
-        # self.move_group_arm.go(self.arm_positions['lift'], wait=True)
-        # self.move_group_arm.stop()
+        self.move_group_gripper.go(self.grips['close'], wait=True)
+        self.move_group_gripper.stop()
+        self.move_group_arm.go(self.arm_positions['lift'], wait=True)
+        self.move_group_arm.stop()
         time.sleep(3)
 
     # Put down an object
     def put_down_object(self):
-        # self.move_group_arm.go(self.arm_positions['start'], wait=True)
-        # self.move_group_arm.stop()
-        # self.move_group_gripper.go(self.grips['open'], wait=True)
-        # self.move_group_gripper.stop()
+        self.move_group_arm.go(self.arm_positions['start'], wait=True)
+        self.move_group_arm.stop()
+        self.move_group_gripper.go(self.grips['open'], wait=True)
+        self.move_group_gripper.stop()
         time.sleep(3)
 
 
@@ -310,7 +310,6 @@ class RobotController(object):
         # publish to our learning reward topic
         self.reward_pub = rospy.Publisher("/q_learning/reward", QLearningReward, queue_size=10)
         print("Controller initialized.")
-        self.run()
 
     def accept_action(self, action):
         print("Received action: ", action)
@@ -340,6 +339,7 @@ class RobotController(object):
             sys.exit()
 
         target = self.perception.get_target()
+        # target = 0, 0  # FOR testing put an object down, make sure to remove this!
         while self.manipulator.follow_target(target):
             target = self.perception.get_target()
 
@@ -352,8 +352,14 @@ class RobotController(object):
         # Publish an empty reward for now
         self.reward_pub.publish(QLearningReward())
 
+    def start_controller(self):
+        # Publish an empty reward to let the action handler know to start
+        # self.reward_pub.publish(QLearningReward())
+        self.run()
+
     def run(self):
         rospy.spin()
 
 if __name__ == "__main__":
     node = RobotController()
+    node.start_controller()
