@@ -1,5 +1,12 @@
 <launch>
-  <!-- run world restting node -->
+<!--    TODO: Find way to run image transport from launch file. For now, you have to run this yourself in another terminal-->
+<!--    rosrun image_transport republish compressed in:=raspicam_node/image raw out:=camera/rgb/image_raw-->
+
+<!--  This file does not assume that base manipulator has been launched. Please launch that yourself-->
+
+  <include file="$(find turtlebot3_manipulation_moveit_config)/launch/move_group.launch">
+    <arg name="model" value="$(arg model)"/>
+  </include>
   <node name="robot_controller" pkg="q_learning_project" type="robot_controller.py" respawn="false" />
 
   <node name="robot_action" pkg="q_learning_project" type="robot_action.py" respawn="false" />

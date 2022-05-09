@@ -68,20 +68,22 @@ class RobotAction(object):
             print("[R-ACTION ERROR] Received a reward before started run!")
             return
         if self.processing.is_set():
-            print("[QLEARNER ERROR] Received duplicate reward!")
+            print("[R-ACTION ERROR] Received duplicate reward!")
             return
         self.processing.set()
         self.last_reward_msg = reward
 
         print("[R-ACTION] accepting a new reward")
-        if self.reward_maximized():
-            # Cause the node to exit if we're done moving objects
-            self.exit.set()
-            return
         next_action_id = self.get_next_action()
         print("[R-ACTION] Sending next action: ", next_action_id)
         self.send_action(next_action_id)
         self.processing.clear()
+
+        # If this last action maximized our reward, then exit
+        if self.reward_maximized():
+            # Cause the node to exit if we're done moving objects
+            self.exit.set()
+            return
 
     # Only take three steps
     def reward_maximized(self):
@@ -113,9 +115,9 @@ class RobotAction(object):
 
     # Once we have everything initialized, start sending actions
     def start_action_sequence(self):
-        time.sleep(1)
-        print("[R-ACTION] Sending first action from state 0")
-        self.send_action(self.get_next_action())
+        # time.sleep(1)
+        # print("[R-ACTION] Sending first action from state 0")
+        # self.send_action(self.get_next_action())
 
         # Run our learner
         self.run()

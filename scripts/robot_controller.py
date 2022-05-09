@@ -49,9 +49,9 @@ class RobotPerception(object):
         self.objects = {
             'blue': {
                 # HSV: 210, 1, 1
-                'lower': cv_hsv(210, 1, 1),
+                'lower': cv_hsv(180, 1/2, 3/4),
                 # HSV: 210, 1/2, 3/4
-                'upper': cv_hsv(210, 1/2, 3/4)
+                'upper': cv_hsv(230, 1, 1)
             },
             'pink': {
                 # HSV: 330, 1, 1
@@ -65,9 +65,9 @@ class RobotPerception(object):
             },
             'green': {
                 # HSV: 120, 1/2, 1
-                'lower': cv_hsv(120, 1/2, 1),
+                'lower': cv_hsv(60, 1/2, 3/4),
                 # HSV: 120, 1, 3/4
-                'upper': cv_hsv(120, 1, 3/4)
+                'upper': cv_hsv(110, 1, 1)
             }
         }
 
@@ -156,7 +156,8 @@ class RobotPerception(object):
             # # the center point of the yellow pixels
             # # hint: if you don't see a red circle, check your bounds for what is considered 'yellow'
             cv2.circle(self.image, (cx, cy), 20, (0, 0, 255), -1)
-            ret = -float((cx - w / 2)) / w
+            err = -float((cx - w / 2)) / w
+            ret = err  # math.pow(err, 2) if err > 0 else -1 * math.pow(err, 2)
         # Set our reported target err
         self.target_err = ret
 
@@ -182,11 +183,13 @@ class RobotManipulator(object):
 
         self.arm_positions = {
             'start': joint_angs_to_radians([0, 17, 16, -33]),
-            'lift': joint_angs_to_radians([0, -100, 79, -70])
+            'lift': joint_angs_to_radians([0, -95, 75, -70]),
+            'drop': joint_angs_to_radians([1, 16, 17, -32]),
+
         }
 
         self.grips = {
-            'close': [0, 0],
+            'close': [0.0, 0.0],
             'open': [.01, .01]
         }
 
@@ -198,14 +201,28 @@ class RobotManipulator(object):
         # Set a goal distance, how close we should get to a target
         self.target_dist = .175  # m
 
-        self.move_group_arm.go(self.arm_positions['start'], wait=True)
-        self.move_group_gripper.go(self.grips['open'], wait=True)
+        # while True:
+        #     print("Testing arm...")
+        #     self.return_arm_to_start()
+        #     self.pickup_object()
+        #     self.put_down_object()
+
+        self.return_arm_to_start()
 
         self.arm_ready = True
 
     # Stop the robot where it is
     def stop(self):
         self.move.publish(Twist())
+
+    # Backup a little bit
+    def backup(self, duration):
+        end_time = time.time() + duration
+        movement = Twist()
+        movement.linear.x = -self.linear_speed
+        while time.time() < end_time:
+            self.move.publish(movement)
+        self.stop()
 
     def initialized(self):
         return self.arm_ready
@@ -256,8 +273,17 @@ class RobotManipulator(object):
             # Return false if we ever come in range of our target
             return dist > self.target_dist
 
+    def return_arm_to_start(self):
+        print("[MANIPULATOR] Returning arm to start...")
+        self.move_group_arm.go(self.arm_positions['start'], wait=True)
+        self.move_group_arm.stop()
+        self.move_group_gripper.go(self.grips['open'], wait=True)
+        self.move_group_gripper.stop()
+        time.sleep(3)
+
     # Pick up an object
     def pickup_object(self):
+        print("[MANIPULATOR] Picking object up...")
         self.move_group_gripper.go(self.grips['close'], wait=True)
         self.move_group_gripper.stop()
         self.move_group_arm.go(self.arm_positions['lift'], wait=True)
@@ -266,7 +292,8 @@ class RobotManipulator(object):
 
     # Put down an object
     def put_down_object(self):
-        self.move_group_arm.go(self.arm_positions['start'], wait=True)
+        print("[MANIPULATOR] Putting object down...")
+        self.move_group_arm.go(self.arm_positions['drop'], wait=True)
         self.move_group_arm.stop()
         self.move_group_gripper.go(self.grips['open'], wait=True)
         self.move_group_gripper.stop()
@@ -281,8 +308,16 @@ It uses our perception and
 
 class RobotController(object):
     def __init__(self):
+        self.initialized = False
+
         # Initialize this node
         rospy.init_node("robot_controller")
+
+        # subscribe to the topic publishing actions for the robot to take
+        rospy.Subscriber("/q_learning/robot_action", RobotMoveObjectToTag, self.accept_action)
+
+        # publish to our learning reward topic
+        self.reward_pub = rospy.Publisher("/q_learning/reward", QLearningReward, queue_size=10)
 
         self.rate = rospy.Rate(10)
         print("Waiting for perception to be initialized")
@@ -304,12 +339,8 @@ class RobotController(object):
 
         # ROS:
 
-        # subscribe to the topic publishing actions for the robot to take
-        rospy.Subscriber("/q_learning/robot_action", RobotMoveObjectToTag, self.accept_action)
-
-        # publish to our learning reward topic
-        self.reward_pub = rospy.Publisher("/q_learning/reward", QLearningReward, queue_size=10)
         print("Controller initialized.")
+        self.initialized = True
 
     def accept_action(self, action):
         print("Received action: ", action)
@@ -338,27 +369,35 @@ class RobotController(object):
             print("[R-Controller ERROR] Can't locate this tag: ", action.tag_id)
             sys.exit()
 
-        target = self.perception.get_target()
-        # target = 0, 0  # FOR testing put an object down, make sure to remove this!
+        # target = self.perception.get_target()
+        target = 0, 0  # FOR testing put an object down, make sure to remove this!
         while self.manipulator.follow_target(target):
             target = self.perception.get_target()
 
         # Stop the robot
         self.manipulator.stop()
 
-        # Pickup the object
+        # Put down the object
         self.manipulator.put_down_object()
+
+        # Back away from the object
+        self.manipulator.backup(duration=5)
+
+        # Return the arm to the start position
+        self.manipulator.return_arm_to_start()
 
         # Publish an empty reward for now
         self.reward_pub.publish(QLearningReward())
 
     def start_controller(self):
         # Publish an empty reward to let the action handler know to start
-        # self.reward_pub.publish(QLearningReward())
+        time.sleep(3)
+        self.reward_pub.publish(QLearningReward())
         self.run()
 
     def run(self):
         rospy.spin()
+
 
 if __name__ == "__main__":
     node = RobotController()
