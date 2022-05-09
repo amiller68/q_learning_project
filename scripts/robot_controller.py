@@ -86,7 +86,7 @@ class RobotPerception(object):
         self.scan_data = None  # The scan data the robot is currently processing
 
         # Use these to debug perception
-        # self.test_color_perception()
+        self.test_color_perception()
         # self.test_tag_perception()
 
         self.class_initialized = True
