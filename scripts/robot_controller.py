@@ -50,9 +50,9 @@ class RobotPerception(object):
         self.objects = {
             'blue': {
                 # HSV: 210, 1, 1
-                'lower': cv_hsv(180, 1/2, 3/4),
+                'lower': cv_hsv(175, .5, .5),
                 # HSV: 210, 1/2, 3/4
-                'upper': cv_hsv(230, 1, 1)
+                'upper': cv_hsv(225, 1, 1)
             },
             'pink': {
                 # HSV: 330, 1, 1
@@ -66,9 +66,9 @@ class RobotPerception(object):
             },
             'green': {
                 # HSV: 120, 1/2, 1
-                'lower': cv_hsv(60, 1/2, 3/4),
+                'lower': cv_hsv(80, .5, .6),
                 # HSV: 120, 1, 3/4
-                'upper': cv_hsv(110, 1, 1)
+                'upper': cv_hsv(130, 1, 1)
             }
         }
 
@@ -86,7 +86,7 @@ class RobotPerception(object):
         self.scan_data = None  # The scan data the robot is currently processing
 
         # Use these to debug perception
-        self.test_color_perception()
+        # self.test_color_perception()
         # self.test_tag_perception()
 
         self.class_initialized = True
@@ -140,7 +140,7 @@ class RobotPerception(object):
         for color, ranges in self.objects.items():
             self.set_target(color)
             print("Looking for: ", color)
-            while not self.get_target():
+            while self.get_target():
                 pass
             print("Found: ", color)
             time.sleep(3)
