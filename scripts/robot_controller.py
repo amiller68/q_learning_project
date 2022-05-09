@@ -34,6 +34,7 @@ Works on objects identified by color or AR tags
 
 class RobotPerception(object):
     def __init__(self):
+        self.class_initialized = False
         # HOW OUR LINE FOLLOWER WAS INITIALIZED
         self.bridge = cv_bridge.CvBridge()
         # # initalize the debugging window
@@ -84,6 +85,12 @@ class RobotPerception(object):
         self.image = None  # The image the robot is currently processing
         self.scan_data = None  # The scan data the robot is currently processing
 
+        # Use these to debug perception
+        # self.test_color_perception()
+        # self.test_tag_perception()
+
+        self.class_initialized = True
+
     def image_callback(self, data):
         # Bind the img to our state variable
         self.image = self.bridge.imgmsg_to_cv2(data, desired_encoding='bgr8')
@@ -103,7 +110,7 @@ class RobotPerception(object):
 
     # check if the perceptor is initialized
     def initialized(self):
-        return self.image is not None and self.scan_data is not None
+        return self.image is not None and self.scan_data is not None and self.class_initialized
 
     # Get the perceptors scan parameters. Used by the manipulator to determine max scan range
     def get_scan_data(self):
@@ -127,6 +134,28 @@ class RobotPerception(object):
         if self.target_err:
             return self.target_err, self.target_dist
         return None
+
+    # A debugging script to test how well our node can perceive objects
+    def test_color_perception(self):
+        for color, ranges in self.objects.items():
+            self.set_target(color)
+            print("Looking for: ", color)
+            while not self.get_target():
+                pass
+            print("Found: ", color)
+            time.sleep(3)
+        print("Found all the colors!")
+
+    # A debugging script to test how well our node can perceive tags
+    def test_tag_perception(self):
+        for tag, ar in self.tags.items():
+            self.set_target(tag)
+            print("Looking for: ", tag)
+            while not self.get_target():
+                pass
+            print("Found: ", tag)
+            time.sleep(3)
+        print("Found all the tags!")
 
     # Locate an object and set orientation correction to target_err
     # If the object is found then set this value to None
