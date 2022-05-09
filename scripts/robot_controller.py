@@ -50,14 +50,14 @@ class RobotPerception(object):
         self.objects = {
             'blue': {
                 # HSV: 210, 1, 1
-                'lower': cv_hsv(175, .5, .5),
+                'lower': cv_hsv(180, .25, .25),
                 # HSV: 210, 1/2, 3/4
-                'upper': cv_hsv(225, 1, 1)
+                'upper': cv_hsv(230, 1, 1)
             },
             'pink': {
                 # HSV: 330, 1, 1
                 # 'lower': cv_hsv(300, .85, .75),
-                'lower': cv_hsv(280, .6, .5),
+                'lower': cv_hsv(280, .4, .3),
 
                 # 'lower': cv_hsv(0, 0, 0),
 
@@ -66,16 +66,18 @@ class RobotPerception(object):
             },
             'green': {
                 # HSV: 120, 1/2, 1
-                'lower': cv_hsv(80, .5, .6),
+                'lower': cv_hsv(80, .25, .25),
                 # HSV: 120, 1, 3/4
                 'upper': cv_hsv(130, 1, 1)
             }
         }
 
+        # TODO: Fix
+        # HElla redundant
         self.tags = {
-            1: '',
-            2: '',
-            3: ''
+            1: 1,
+            2: 2,
+            3: 3
         }
 
         # State to keep track of what object/tag we're targetting and our latest img data
@@ -84,6 +86,7 @@ class RobotPerception(object):
         self.target_dist = None  # How far the object directly in front of our robot is
         self.image = None  # The image the robot is currently processing
         self.scan_data = None  # The scan data the robot is currently processing
+        self.aruco_dict = cv2.aruco.Dictionary_get(cv2.aruco.DICT_4X4_50)
 
         # Use these to debug perception
         # self.test_color_perception()
@@ -100,12 +103,13 @@ class RobotPerception(object):
             self.locate_object()
         elif self.target in self.tags:
             self.locate_tag()
-        cv2.imshow("window", self.image)
-        cv2.waitKey(3)
+        # cv2.imshow("window", self.image)
+        # cv2.waitKey(3)
 
     def scan_callback(self, msg):
         self.scan_data = msg
         # Bind our target dist to the range of the object in front of us
+
         self.target_dist = msg.ranges[0]
 
     # check if the perceptor is initialized
@@ -140,11 +144,13 @@ class RobotPerception(object):
         for color, ranges in self.objects.items():
             self.set_target(color)
             print("Looking for: ", color)
-            while self.get_target():
+            while not self.get_target():
                 pass
             print("Found: ", color)
             time.sleep(3)
         print("Found all the colors!")
+        sys.exit()
+
 
     # A debugging script to test how well our node can perceive tags
     def test_tag_perception(self):
@@ -193,8 +199,32 @@ class RobotPerception(object):
     # Locate an AR tag and set an orientation correction to target_err
     # If the location is unknown set this value to None
     def locate_tag(self):
+        img_h, img_w, img_d = self.image.shape
+        # turn the image into a grayscale
+        gray_image = cv2.cvtColor(self.image, cv2.COLOR_BGR2GRAY)
+
+        corners, ids, rejected_points = cv2.aruco.detectMarkers(gray_image, self.aruco_dict)
+
+        # Extract our target id
+        target_id = self.tags[self.target]
+
         ret = None
-        # This should look similar to the above, but we need to use the cv2 library
+        if ids is not None:
+            ids = list(map(lambda x: x[0], ids))
+            # print("Observed IDs: ", ids)
+            # For some reason ids are structured like nested lists
+            if target_id in ids:
+                id_index = ids.index(target_id)
+                # print("Target is ind: ", id_index)
+                target_corners = list(map(lambda x: (x[0], x[1]), corners[id_index][0]))
+                cx, cy = 0, 0
+                for tx, ty in target_corners:
+                    cx += tx / len(target_corners)
+                    cy += ty / len(target_corners)
+                # print("Center: ", cx, cy)
+                cv2.circle(self.image, (int(cx), int(cy)), 20, (0, 0, 255), -1)
+                err = -float((cx - img_w / 2)) / img_w
+                ret = err  # math.pow(err, 2) if err > 0 else -1 * math.pow(err, 2)
         self.target_err = ret
 
 
@@ -202,7 +232,7 @@ def joint_angs_to_radians(angs):
     return map(math.radians, angs)
 
 class RobotManipulator(object):
-    def __init__(self, scan_range_max=4.5):
+    def __init__(self, scan_range_max=4.5, scan_range_min=0.1):
         # Initialize a publisher to the velocity cmd topic
         self.move = rospy.Publisher('/cmd_vel', Twist, queue_size=10)
 
@@ -224,7 +254,7 @@ class RobotManipulator(object):
 
         # Set our velocity constants
         self.linear_speed = .05  # m/s
-        self.angular_speed = -.75  # rad/s
+        self.angular_speed = .4  # rad/s
         self.scan_range_max = scan_range_max
 
         # Set a goal distance, how close we should get to a target
@@ -258,8 +288,9 @@ class RobotManipulator(object):
 
     # Tell the robot to follow some object based on estimated orientation error and how far it is, stored in tuple
     # Publishes a movement command that follows the specified target
-    def follow_target(self, target):
-
+    def follow_target(self, target, target_dist=None):
+        if not target_dist:
+            target_dist = self.target_dist
         # Extract from target
         follow = Twist()
         # If we don't have a target
@@ -270,7 +301,7 @@ class RobotManipulator(object):
             self.move.publish(follow)
             return True
         else:
-            print("Found a path: ", target)
+            # print("Found a path: ", target)
 
             # err is a float describing a rotation pid
             # dist describes the distance observed directly in front of the robot
@@ -279,33 +310,40 @@ class RobotManipulator(object):
             # Set our linear velocity based on the distance
 
             # If we can't see anything in from of us
-            if math.isinf(dist) or dist == 0:
+            if dist == 0:
+                dist = math.inf
+
+            if math.isinf(dist):
                 # Gotta go fast
                 follow.linear.x = self.linear_speed
             # Else if we're closed in on it
-            elif dist > self.target_dist:
+            elif dist > target_dist:
                 follow.linear.x = \
-                    self.linear_speed * (dist - self.target_dist) / (self.scan_range_max - self.target_dist)
+                    self.linear_speed * (dist - target_dist) / (self.scan_range_max - target_dist)
 
             follow.linear.x = min(
                 self.linear_speed,
-                (dist - self.target_dist) / self.target_dist
+                (dist - target_dist) / target_dist
             )
-            follow.angular.z = err
+            follow.angular.z = err # * self.angular_speed
 
-            print("Converging on target: ", follow.linear.x, "m/s @", follow.angular.z, "rad/s")
+            # print("Converging on target: ", follow.linear.x, "m/s @", follow.angular.z, "rad/s")
             self.move.publish(follow)
 
             # Publish our follow command
             self.move.publish(follow)
 
             # Return false if we ever come in range of our target
-            return dist > self.target_dist
+            if dist < target_dist:
+                print("Got close enough: ", dist)
+            return dist > target_dist
 
     def return_arm_to_start(self):
         print("[MANIPULATOR] Returning arm to start...")
+        time.sleep(1)
         self.move_group_arm.go(self.arm_positions['start'], wait=True)
         self.move_group_arm.stop()
+        time.sleep(6)
         self.move_group_gripper.go(self.grips['open'], wait=True)
         self.move_group_gripper.stop()
         time.sleep(3)
@@ -313,17 +351,21 @@ class RobotManipulator(object):
     # Pick up an object
     def pickup_object(self):
         print("[MANIPULATOR] Picking object up...")
+        time.sleep(1)
         self.move_group_gripper.go(self.grips['close'], wait=True)
         self.move_group_gripper.stop()
+        time.sleep(3)
         self.move_group_arm.go(self.arm_positions['lift'], wait=True)
         self.move_group_arm.stop()
-        time.sleep(3)
+        time.sleep(6)
 
     # Put down an object
     def put_down_object(self):
         print("[MANIPULATOR] Putting object down...")
+        time.sleep(1)
         self.move_group_arm.go(self.arm_positions['drop'], wait=True)
         self.move_group_arm.stop()
+        time.sleep(6)
         self.move_group_gripper.go(self.grips['open'], wait=True)
         self.move_group_gripper.stop()
         time.sleep(3)
@@ -360,7 +402,9 @@ class RobotController(object):
         print("Waiting for manipulator to be initialized")
 
         # Initialize our manipulation class, make sure to provide it with a max scan value
-        self.manipulator = RobotManipulator(scan_range_max=self.perception.get_scan_data().range_max)
+        scan_data = self.perception.get_scan_data()
+        self.manipulator = RobotManipulator(scan_range_max=scan_data.range_max, scan_range_min=scan_data.range_min)
+        print("Initializing manipulator with scan ranges: ", scan_data.range_max, scan_data.range_min )
 
         while not self.manipulator.initialized():
             print("...")
@@ -382,7 +426,7 @@ class RobotController(object):
             sys.exit()
 
         target = self.perception.get_target()
-        while self.manipulator.follow_target(target):
+        while self.manipulator.follow_target(target, target_dist=.22):
             target = self.perception.get_target()
 
         # Stop the robot
@@ -398,9 +442,9 @@ class RobotController(object):
             print("[R-Controller ERROR] Can't locate this tag: ", action.tag_id)
             sys.exit()
 
-        # target = self.perception.get_target()
-        target = 0, 0  # FOR testing put an object down, make sure to remove this!
-        while self.manipulator.follow_target(target):
+        target = self.perception.get_target()
+        # target = 0, 0  # FOR testing put an object down, make sure to remove this!
+        while self.manipulator.follow_target(target, target_dist=.4375):
             target = self.perception.get_target()
 
         # Stop the robot
@@ -410,7 +454,7 @@ class RobotController(object):
         self.manipulator.put_down_object()
 
         # Back away from the object
-        self.manipulator.backup(duration=5)
+        self.manipulator.backup(duration=3)
 
         # Return the arm to the start position
         self.manipulator.return_arm_to_start()
