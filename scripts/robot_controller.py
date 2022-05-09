@@ -469,6 +469,7 @@ class RobotController(object):
         self.run()
 
     def run(self):
+        rospy.loginfo("[R-CONTROLLER] Running")
         rospy.spin()
 
 
