@@ -151,7 +151,6 @@ class RobotPerception(object):
         print("Found all the colors!")
         sys.exit()
 
-
     # A debugging script to test how well our node can perceive tags
     def test_tag_perception(self):
         for tag, ar in self.tags.items():
