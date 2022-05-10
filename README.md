@@ -15,6 +15,11 @@ Alex: 0:42
 <br>
 Hamlet: 0:42
 
+## Notes
+
+We weren't able to get a recording of a successful run of our robot. When we went to record after testing that everything worked we kept getting an enormous amount of lag that prevented our robot from performing correctly.
+Therefore, we can include neither a rosbag nor gif of our robot moving objects.
+
 ## Writeup
 
 **Objectives description:** 
