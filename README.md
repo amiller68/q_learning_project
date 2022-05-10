@@ -11,9 +11,9 @@ Alex: 2:06
 Hamlet: 2:05
 
 ### Final Deliverables:
-Alex: 0:42
+Alex: 0:44
 <br>
-Hamlet: 0:42
+Hamlet: 0:44
 
 ## Notes
 
