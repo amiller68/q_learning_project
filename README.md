@@ -7,11 +7,13 @@ Alex Miller and Hamlet Fernandez
 
 ### Implementation Plan
 Alex: 2:06
+<br>
 Hamlet: 2:05
 
 ### Final Deliverables:
-Alex: ?
-Hamlet: ?
+Alex: 0:42
+<br>
+Hamlet: 0:42
 
 ## Writeup
 
